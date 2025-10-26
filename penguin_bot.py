@@ -1,0 +1,189 @@
+import os
+import platform
+import socket
+import qrcode
+import base64
+import urllib.request
+import json
+import io
+from datetime import datetime
+from dotenv import load_dotenv
+from openai import OpenAI
+from PIL import Image
+import streamlit as st
+import pyttsx3
+
+# --- Load environment and API ---
+load_dotenv()
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# --- Setup Streamlit page ---
+st.set_page_config(
+    page_title="🐧 Cowalsky - Penguin Assistant",
+    page_icon="🐧",
+    layout="centered"
+)
+
+st.markdown(
+    """
+    <style>
+    body {
+        background-color: #121212;
+        color: white;
+    }
+    .stButton > button {
+        background-color: black;
+        color: white;
+        border: 1px solid #444;
+    }
+    .stTextInput, .stTextArea, .stNumberInput {
+        color: white;
+        background-color: #1e1e1e;
+        border: 1px solid #333;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+# --- Initialize speech engine ---
+engine = pyttsx3.init()
+engine.setProperty('rate', 175)
+engine.setProperty('volume', 1.0)
+
+if platform.system() == "Darwin":
+    def penguin_speak(text): os.system(f'say "{text}"')
+else:
+    def penguin_speak(text):
+        engine.say(text)
+        engine.runAndWait()
+
+# --- Utility functions ---
+def get_time(): return datetime.now().strftime("%I:%M:%S %p")
+def get_date(): return datetime.now().strftime("%B %d, %Y")
+
+def get_local_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "Unable to determine local IP"
+
+def get_public_ip():
+    try:
+        with urllib.request.urlopen("https://api.ipify.org?format=json", timeout=5) as resp:
+            data = json.load(resp)
+            return data.get("ip", "Unknown")
+    except Exception:
+        return "Unable to fetch public IP"
+
+def make_qr(data):
+    qr = qrcode.QRCode(version=1, box_size=10, border=4)
+    qr.add_data(data)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="white", back_color="black")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+def generate_image(prompt):
+    try:
+        response = client.images.generate(
+            model="gpt-image-1",
+            prompt=prompt,
+            size="512x512"
+        )
+        image_base64 = response.data[0].b64_json
+        return base64.b64decode(image_base64)
+    except Exception as e:
+        return None
+
+def chat_with_cowalsky(user_input):
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are Cowalsky, a cute and clever penguin assistant who replies helpfully and humorously."},
+                {"role": "user", "content": user_input}
+            ]
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"⚠️ Error: {e}"
+
+# --- UI Layout ---
+st.title("🐧 Cowalsky the Penguin Assistant")
+
+st.markdown("### Waddle in and ask me anything! 🧊")
+dictation_mode = st.toggle("🎤 Dictation Mode (Speak Responses)")
+
+with st.sidebar:
+    st.header("🧰 Quick Tools")
+    if st.button("🕒 Show Time"):
+        t = get_time()
+        st.success(f"The time is {t}")
+        if dictation_mode:
+            penguin_speak(f"The time is {t}")
+
+    if st.button("📅 Show Date"):
+        d = get_date()
+        st.success(f"Today is {d}")
+        if dictation_mode:
+            penguin_speak(f"Today is {d}")
+
+    if st.button("🏠 Local IP"):
+        ip = get_local_ip()
+        st.info(f"Local IP: {ip}")
+        if dictation_mode:
+            penguin_speak(f"Local IP is {ip}")
+
+    if st.button("🌐 Public IP"):
+        pip = get_public_ip()
+        st.info(f"Public IP: {pip}")
+        if dictation_mode:
+            penguin_speak(f"Public IP is {pip}")
+
+    st.divider()
+    st.subheader("🧾 Generate QR Code")
+    qr_data = st.text_input("Enter text or URL for QR code:")
+    if st.button("Generate QR"):
+        if qr_data.strip():
+            qr_img = make_qr(qr_data)
+            st.image(qr_img, caption="Your QR Code", use_column_width=True)
+            st.download_button("Download QR Code", qr_img, file_name="cowalsky_qr.png")
+            if dictation_mode:
+                penguin_speak("QR code generated successfully.")
+        else:
+            st.warning("Please enter text or a URL first.")
+
+    st.divider()
+    st.subheader("🎨 Image Generator")
+    img_prompt = st.text_input("Enter a description to generate an image:")
+    if st.button("Generate Image"):
+        with st.spinner("Cowalsky is drawing your image... 🎨"):
+            img_data = generate_image(img_prompt)
+            if img_data:
+                st.image(img_data, caption="Generated by Cowalsky", use_column_width=True)
+                st.download_button("Download Image", img_data, file_name="cowalsky_image.png")
+                if dictation_mode:
+                    penguin_speak("Here is your generated image!")
+            else:
+                st.error("Failed to generate image.")
+
+# --- Chat Section ---
+st.divider()
+user_message = st.text_input("You:", placeholder="Ask Cowalsky something...")
+
+if st.button("Send") or user_message:
+    with st.spinner("🐧 Thinking..."):
+        bot_reply = chat_with_cowalsky(user_message)
+        st.markdown(f"**🐧 Cowalsky:** {bot_reply}")
+        if dictation_mode:
+            penguin_speak(bot_reply)
+
+st.markdown("---")
+st.caption("🐧 Powered by OpenAI · Created by Parthand Cowalsky")
+
